@@ -1,0 +1,770 @@
+---
+title: "Task 2"
+author: "Mencía Gómez Luna - id document: 05468738-M"
+format: 
+  revealjs:
+    smaller: true
+    theme: simple
+    embed-resources: true 
+execute:
+  echo: true
+---
+
+
+## Instructions (read before starting)
+
+-   Modify inside the `.qmd` document your personal data (name and ID) located in the header of the file. **Do not touch anything else** in the header (note that I have included `embed-resources: true` so that everything is contained in a single html without extra files, and `theme: [style.scss]` to give a cuckoo style to the delivery with the `style.scss` file in the folder).
+
+-   Make sure, **BEFORE further editing** the document, that the `.qmd` file is rendered correctly and the corresponding `.html` is generated in your local folder on your computer. The chunks (code boxes) created are either empty or incomplete, hence most of them have the `#| eval: false` option. Once you edit what you consider, you must change each chunck to `#| eval: true` (or remove it directly) to run them.
+
+-   Remember that you can run chunk by chunk with the *play* button or run all chunks up to a given chunk (with the button to the left of the previous one)
+
+## Case study: analysis of covid data
+
+![](https://media.tenor.com/vXuV3K-9D5IAAAAM/simonnariz-nariz-simon.gif)
+
+
+## Required packages
+
+Add in the chunck below all the packages you need
+
+```{r}
+rm(list = ls()) # Remove old variables
+
+library(tidyverse)
+library(readxl)
+library (tidyverse)
+library (dplyr)
+library(microbenchmark)
+library(lubridate)
+library(rvest)
+library (datapasta)
+library (zoo)
+```
+
+## Question 1
+
+>In the project folder you have the dataset `messy_covid_data.xlsx`. Take a look at the `{readxl}` package and load the file correctly.
+
+## Question 1
+
+```{r}
+#| eval: true
+data <- read_excel("messy_covid_data.xlsx")
+print (data)
+```
+
+Column names code sex (H male, M female, NC as missing) and age group (0-9, 10-19, 20-29, 30-39, 40-49, 50-59, 60-69, 70-79, ≥80 years and NC as missing).
+
+
+## Question 2
+
+> Design a loop that goes through all rows and, except for the first two columns, converts each 0 found in the row to an `NA`.
+
+
+My computer doesn't have the capacity to render this loop (it stays rendering per hours), but it would look like this (but without the #): 
+
+```{r}
+#| eval: true
+#for (i in 1:nrow(data)) {
+  #data[i, -(1:2)] <- lapply(data[i, -(1:2)], function(x) ifelse(x == 0, NA, x))}
+```
+
+## Question 3
+
+> Perform the above action with the original table but in tidyverse mode: loops, brackets and dollars are forbidden. Make it as generally applicable as possible.
+
+
+```{r}
+#| eval: true
+data <- data |>
+  mutate(across(-c(1, 2), ~ ifelse(. == 0, NA, .)))
+
+print (data)
+```
+
+## Question 4
+
+> Design a function to test both methods using the `{microbenchmark}` package in terms of time efficiency.
+
+## Question 4
+>I create a random sample to try the function on to make it easier and faster
+
+```{r}
+#| eval: true 
+set.seed(1234)
+sample_data <- data |> slice_sample(n = 1000)
+
+#Then I compare methods
+method_loop <- function(data) {
+  for (i in 1:nrow(data)) {
+    data[i, -(1:2)] <- lapply(data[i, -(1:2)], function(x) ifelse(x == 0, NA, x))
+  }
+  return(data)
+}
+
+method_tidyverse <- function(data) {
+  data |>
+    mutate(across(-c(1, 2), ~ ifelse(. == 0, NA, .)))
+}
+
+benchmark_results <- microbenchmark(
+  loop_method = method_loop(sample_data),
+  tidyverse_method = method_tidyverse(sample_data),
+  times = 30 #number of times each method should be run to measure its performance (it could be more than 30 but 30 is reasonable and faster)
+)
+```
+
+## Question 4
+
+```{r}
+print(benchmark_results)
+```
+
+>**ANSWER:** When comparing the two methods on a random sample of 1000 cases, we see that **the loop method takes much longer (time) than the tidyverse method**. Specifically, with the loop method it takes ~800 milliseconds on average and the tidyverse method takes ~8 milliseconds on average (each time it is rendered the values vary a little)
+
+## Question 5
+
+> Reasons why the data is not tidydata and converts to tidydata, deleting rows as appropriate.
+
+```{r}
+#| eval: true
+tidy_covid <- data |>
+  pivot_longer(
+    cols = -c(provincia_iso, fecha),
+    names_to = "age_sexo", 
+    values_to = "cases"
+  ) |>
+  separate(
+    age_sexo,
+    into = c("age_group", "sex"), 
+    sep = "_",
+    remove = FALSE
+  ) |>
+  select(-age_sexo) 
+
+print (tidy_covid, width = Inf) #to show all columns
+```
+
+## Question 5
+
+> **ANSWER:** The original data is not tidy because of some reasons: First of all, **each variable is not a single column** (f.e: age is not a variable, we have more: 0-9_H, 10-19_H, etc).
+Also, as we see in this example, we have a lot of columns where **gender is mixed with the age**. So, we don't have a column for "age" and another for "gender", so again each variable is not a single column.
+Also, there are **missing rows for each unique observation**: Each combination of province, date, age, gender, and category should be a separate row, otherwise we will have missing values for complex combinations like "for X province, Age  Y and Gender Z we don't have value"
+
+## Question 6
+
+> One of the columns we have coded sometimes as `thing_thing`, sometimes as `thing+_thing`, sometimes as `NC_thing`. Try to separate that column to generate three new columns `age_inf`, `age_up` and `sex` properly. For example, if I have `10-19_H` I will have to send the 10 to one column, the 19 to another and H to another; if I have `80+_H` I will have to send 80 to one, NA to another (there is no upper bound) and H to another; if I have `NC_H` you will have to have NA, NA and H.
+
+## Question 6
+
+```{r}
+#| eval: true
+tidy_covid <- data |>
+  pivot_longer(
+    cols = -c(provincia_iso, fecha), # Keep these columns
+    names_to = "age_sex", 
+    values_to = "cases"  
+  ) |>
+  mutate(
+    age_inf = str_extract(age_sex, "^[0-9]+"), # we create age_inf  
+    age_up = str_extract(age_sex, "(?<=-)[0-9]+"), #we create age_up
+    sex = str_extract(age_sex, "(?<=_)[A-Za-z]+"), #we create sex
+    age_inf = as.numeric(age_inf),
+    age_up = as.numeric(age_up)  
+  ) |>
+  #special cases like "80+" and "NC"
+  mutate(
+    age_up = ifelse(str_detect(age_sex, "\\+"), NA, age_up), #NA if the format includes "+"
+    age_inf = ifelse(str_detect(age_sex, "^NC"), NA, age_inf), #NA if it's "NC"
+    age_up = ifelse(str_detect(age_sex, "^NC"), NA, age_up),    #NA if it's "NC"
+    sex = ifelse(sex == "NC", NA, sex) #NA if it's "NC"
+  )
+
+print (tidy_covid, width = Inf)
+```
+
+## Question 6
+
+> **ANSWER:** With this code, what we do is first create a column for age_sex and another for cases to bind all the data so as not to have a lot of innecesary columns. Secondly, we divide the age_sex column (that we just created) into three columns: age_inf, age_up and sex, making sure that the age remains as numerical values. Finally, for special cases such as "80+" or "NC" we set them to missing (NA)
+> I also leave the variable age_sex because we'll need it in a future exercise to extract the age group
+
+## Question 7
+
+> Add a new variable `month_year` to the table that encodes the month and year (for example, any day in January 2020 will be something similar to “1-2020” and any day in February 2021 will be “2-2021”).
+
+## Question 7
+
+```{r}
+#| eval: true
+tidy_covid <- tidy_covid |>
+  mutate(
+    month_year = paste0(month(fecha), "-", year(fecha)))
+
+print (tidy_covid, width = Inf)
+```
+
+## Question 7
+
+> Import from wikipedia (using code) <https://es.wikipedia.org/wiki/ISO_3166-2:ES#Provincias> the table containing the ISO codes for each province.
+
+```{r}
+#| eval: true
+url <- "https://es.wikipedia.org/wiki/ISO_3166-2:ES#Provincias!"
+prop_ISO <- read_html(url)
+prop_ISO <- html_table(prop_ISO, fill=TRUE)
+prop_ISO <- as_tibble(prop_ISO[[2]])  
+
+```
+
+>I had problems with the variable  "Nombre de la subdivisión en la ISO[1]" in future exercises, so I try to change it and rename it
+
+```{r}
+colnames(prop_ISO) <- gsub(" ", "_", colnames(prop_ISO))
+colnames(prop_ISO) <- gsub("[[:punct:]]", "", colnames(prop_ISO))
+
+prop_ISO <- prop_ISO |>
+  rename(provincia = NombredelasubdivisiónenlaISO1,
+         CCAA = Comunidadautónoma)
+
+print (prop_ISO)
+```
+
+## Question 7
+
+> Some provinces and codes have added [note x], so we cleant it to do a clean join in the next Exercise
+
+```{r}
+prop_ISO <- prop_ISO |>
+  mutate(
+    provincia = gsub("\\[nota \\d+\\]​?", "", provincia),  
+    provincia = gsub("\\s?\\(.*?\\)", "", provincia),   
+    provincia = trimws(provincia),
+    Código = gsub("\\[nota \\d+\\]​?", "", Código),  
+    Código = gsub("\\s?\\(.*?\\)", "", Código),   
+    Código = trimws(Código),
+    Código = gsub("ES-", "", Código))
+
+print (prop_ISO)
+```
+
+## Question 8
+
+> Preprocess as you consider the previous table to be able to join that table to the `tidy_covid` table.
+
+## Question 8
+>Before joining the databases we have to check if the values of Código/provincia_iso match 
+
+```{r}
+#| eval: true
+tidy_covid_vals <- unique(tidy_covid$provincia_iso)
+prop_ISO_vals <- unique(prop_ISO$Código)
+
+# Values of tidy_covid that aren't in prop_ISO: CE, ML, NC, missings (NA)
+tidy_covid_vals[!tidy_covid_vals %in% prop_ISO_vals]
+```
+
+```{r}
+#Values of prop_ISO that aren't in tidy_covid: NA
+prop_ISO_vals[!prop_ISO_vals %in% tidy_covid_vals] #NA
+```
+## Question 8
+
+> We do a left join including Ceuta, Melilla and NC
+
+```{r}
+# Join (we add CE, ML and NC):
+final_data <- tidy_covid |>
+  left_join(prop_ISO, by = c("provincia_iso" = "Código")) |>
+  mutate(
+    provincia = case_when(
+      provincia_iso == "CE" ~ "Ceuta",
+      provincia_iso == "ML" ~ "Melilla",
+      provincia_iso == "NC" ~ "NC",
+      TRUE ~ provincia
+    ),
+    CCAA = case_when(
+      provincia_iso == "CE" ~ "CE",
+      provincia_iso == "ML" ~ "ML",
+      provincia_iso == "NC" ~ "NC",
+      TRUE ~ CCAA
+    )) 
+```
+
+## Question 8
+
+>Before joining the tables, I have checked that the values of the province codes coincide, and if they don't coincide I added the corresponding values (specifically in Ceuta, Melilla and NC - No contesta). [I could also have done it with a full_join but then there was a new observation at the end about Navarra that should be eliminated. I didn't do a inner_join because I would have lost the data for Ceuta, Melilla and NC]
+In exercise 11 we will be asked to add the values for Navarra to completely complete the database
+
+```{r}
+print (final_data, width = Inf)
+```
+
+## Question 9
+
+> Using the previous group variable `month_year` obtain a summary that returns in a tibble, for each province and each month-year, the daily average cases (regardless of age and sex).
+
+## Question 9
+
+```{r}
+#| eval: true
+summary_cases <- final_data |>
+  group_by(provincia_iso, month_year) |>
+  summarise(
+    total_cases = sum(cases, na.rm = TRUE),
+    num_days = n_distinct(fecha),
+    daily_cases = total_cases / num_days,
+    .groups = "drop"  #Avoid the groups from being there after summarizing
+  )
+
+print (summary_cases, width = Inf)
+```
+
+```{r}
+class (summary_cases)
+```
+
+## Question 9
+
+>**ANSWER:**First we group by province and date since this way we can do specific calculations in those groups. Once grouped, we calculate the average number of cases per day (total cases/number of days). We use .groups = "drop"  so that the data frame returns to the original state (without groups). 
+
+## Question 10
+
+> Design a function `summ_by_dates_prov()` that, given a vector of ISO codes of provinces, and a table with an id of province, another of date (we don't care about the month-year because we are going to create it inside the function) and another of cases, returns the average of daily cases that there were each month-year (regardless of sex or age) in the provided provinces. Apply after the function to the ISO codes of the `prov_allowed` vector below and check that it gives you the same as before (it should...)
+
+## Question 10
+
+```{r}
+#| eval: true
+prov_allowed <- c("M", "B", "V", "SE", "Z", "MA")
+
+summ_by_dates_prov <- function(prov_codes, data_table) {
+  data_table |> 
+    filter(provincia_iso %in% prov_codes) |> #Filter provinces that coincide with prov_codes
+    mutate(month_year = format(fecha, "%m-%Y")) |>
+    group_by(provincia_iso, month_year) |> #Calculate the total cases and the number of unique days per group
+    summarise(
+      total_cases = sum(cases, na.rm = TRUE),
+      num_days = n_distinct(fecha),
+      daily_avg_cases = total_cases / num_days,
+      .groups = "drop" 
+    )
+} 
+
+result <- summ_by_dates_prov(prov_allowed, final_data)
+
+print (result, width = Inf)
+```
+
+## Question 10
+
+> **ANSWER:** We get the same results as before for these provinces (prov_allowed). To check it in the previous exercise we have to see the results for the provincia_iso = "M", "B", "V", "SE", "Z", "MA", and the results are the same.
+In this code we specify a function that filters the data by a specific set of provinces, calculates the daily average of cases for each month and province, and returns a summary with these averages. Then, we apply it to our database and the provinces we want.
+
+## Question 11
+
+> Run the code you consider to properly recode the province ISO codes (right now Navarra is as `NA`; look for what should be missing and fix it).
+
+## Question 11
+```{r}
+#| eval: true
+final_data <- final_data |>
+  mutate(
+    provincia_iso = ifelse(is.na(provincia_iso), "NA", provincia_iso),
+    provincia = ifelse(provincia_iso == "NA", "Navarra", provincia),
+    CCAA = ifelse(provincia_iso == "NA", "NA", CCAA)
+  )
+
+print (final_data, width = Inf)
+```
+
+## Question 11
+
+>  **ANSWER:**In addition to putting "NA" in those that were NA (missings), we also added the corresponding values for Navarra in the province and CCAA. Now we have the database with all the provinces included.
+
+## Question 12
+
+> With the database generated in the previous exercise, calculate the proportion of cases with unknown sex. Do the same with unknown province. Eliminate such records if the number of cases represents less than 1% (for each).
+
+## Question 12 
+
+```{r}
+#| eval: true
+#Unknown sex and provinces
+final_data |> 
+  mutate(
+    unknown_sex = is.na(sex),
+    unknown_province = is.na(final_data$provincia_iso) | final_data$provincia_iso == "NC"
+  ) |> 
+  summarise(
+    total_cases = sum(cases, na.rm = TRUE),
+    unknown_sex_cases = sum(cases[unknown_sex], na.rm = TRUE),
+    unknown_province_cases = sum(cases[unknown_province], na.rm = TRUE),
+    prop_unknown_sex = unknown_sex_cases / total_cases,
+    prop_unknown_province = unknown_province_cases / total_cases
+  ) |> 
+  print()
+
+```
+
+## Question 12
+
+> **ANSWER:** 0,000779% of all the cases have unknown sex and 0,003448% of the cases have unknown provinces. 
+
+## Question 12
+
+> Due to the fact that in both cases (sex and provinces), the number of cases represents less than 1% (for each) in the database, we just eliminate them
+
+```{r}
+#| eval: true
+final_data <- final_data |> 
+  filter(!is.na(sex) & !is.na(provincia_iso))
+```
+
+## Question 13
+
+> Create a new variable called `cum_cases` containing the accumulated cases for each date, disaggregated by province, age group and sex.
+
+## Question 13
+
+```{r}
+#| eval: true
+# we create again the variable "age_group"
+final_data <- final_data |>
+  separate(
+    age_sex,
+    into = c("age_group", "sexo"), 
+    sep = "_",
+    remove = FALSE) |>
+  select (-sexo, -age_sex)
+
+final_data <- final_data |>
+  group_by(provincia_iso, age_group, sex, fecha) |>
+  mutate(
+    cum_cases = cumsum(replace_na(cases, 0))  # reeplace NA with 0 only in the cumulative sum
+  ) |>
+  ungroup()
+
+print (final_data, width = Inf)
+
+```
+
+## Question 13
+
+> **ANSWER:** The code groups the records by province, date, age group and sex (we first created the "age group" variable). It then calculates the cumulative sum of cases (cum_cases) within each group (we substitute with 0 the "NA" in cases so there are no problems in the sum. Finally, it ungroups the data to prevent them from remaining grouped after the operation.
+
+## Question 14
+
+> What were the 7 provinces with the most cases throughout the pandemic? And the 5 provinces with the fewest deaths? And if we disaggregate by sex? **We don't know the number of deaths so we only do the part of the exercise that we can do**
+
+## Question 14
+
+```{r}
+#| eval: true
+province_cases <- final_data |>
+  group_by(provincia_iso) |>
+  summarise(total_cases = sum(cases, na.rm = TRUE)) |>
+  arrange(desc(total_cases))
+
+province_cases |>
+  head(7)
+```
+## Question 14
+
+> **ANSWER:** The top 7 provinces with more cases are Barcelona, Madrid, Valencia, Alicante, Murcia, Biscaia and Zaragoza. This makes sense because they are provinces with a large number of inhabitants, so there will also be a large number of infected people.
+
+## Question 14
+
+> And if we desaggregate by sex:
+
+```{r}
+#| eval: true
+province_sex_cases <- final_data |>
+  group_by(provincia_iso, sex) |>
+  summarise(total_cases = sum(cases, na.rm = TRUE)) |>
+arrange(desc(total_cases))
+
+province_sex_cases |>
+  head(7)
+
+```
+## Question 14
+
+>**ANSWER:** The top 7 observations with more cases grouped by sex are also Barcelona, Madrid, Valencia and Alicante, the same as the exercise before.
+
+## Question 15
+
+> Use the `{datapasta}` package to import the population table of the provinces by copying from <https://www.ine.es/jaxiT3/Datos.htm?t=2852>. Incorporate this info into the table as you see fit.
+
+## Question 15
+
+>In the menu I used "Addins" and inside the datapasta package it appeared "paste as tribble" and generated this code:
+
+```{r}
+#| eval: true
+library(datapasta)
+population <- tibble::tribble(
+                               ~provincia, ~poblacion,
+                                 "Total",  47385107,
+                              "Albacete",    386464,
+                      "Alacant/Alicante",   1881762,
+                               "Almería",    731792,
+                           "Araba/Álava",    333626,
+                              "Asturias",   1011792,
+                                 "Ávila",    158421,
+                               "Badajoz",    669943,
+                         "Balears Illes",   1173008,
+                             "Barcelona",   5714730,
+                               "Bizkaia",   1154334,
+                                "Burgos",    356055,
+                               "Cáceres",    389558,
+                                 "Cádiz",   1245960,
+                             "Cantabria",    584507,
+                    "Castellón/Castelló",    587064,
+                           "Ciudad Real",    492591,
+                               "Córdoba",    776789,
+                              "Coruña A",   1120134,
+                                "Cuenca",    195516,
+                              "Gipuzkoa",    726033,
+                                "Girona",    786596,
+                               "Granada",    921338,
+                           "Guadalajara",    265588,
+                                "Huelva",    525835,
+                                "Huesca",    224264,
+                                  "Jaén",    627190,
+                                  "León",    451706,
+                                "Lleida",    439727,
+                                  "Lugo",    326013,
+                                "Madrid",   6751251,
+                                "Málaga",   1695651,
+                                "Murcia",   1518486,
+                               "Navarra",    661537,
+                               "Ourense",    305223,
+                              "Palencia",    159123,
+                            "Palmas Las",   1128539,
+                            "Pontevedra",    944275,
+                              "Rioja La",    319796,
+                             "Salamanca",    327338,
+                "Santa Cruz de Tenerife",   1044405,
+                               "Segovia",    153663,
+                               "Sevilla",   1947852,
+                                 "Soria",     88747,
+                             "Tarragona",    822309,
+                                "Teruel",    134545,
+                                "Toledo",    709403,
+                     "Valencia/València",   2589312,
+                            "Valladolid",    519361,
+                                "Zamora",    168725,
+                              "Zaragoza",    967452,
+                                 "Ceuta",     83517,
+                               "Melilla",     86261
+                )
+
+
+```
+
+## Question 15
+
+>I was having trouble using the "datapaste" package so I generated the code from Addins and got the first code that uses tibble:tribble. Then I do the join with the database final_data
+
+## Question 15
+
+>Before joining the databases we have to check if the values match
+
+```{r}
+#| eval: true
+final_data_vals <- unique(final_data$provincia)
+population_vals <- unique(population$provincia)
+
+# Values of final_data that aren't in population: A Coruña, Las Palmas, NC, València/Valencia, Castelló/Castellón, La Rioja, Balears
+final_data_vals[!final_data_vals %in% population_vals]
+```
+
+```{r}
+#Values of population that aren't in final_data: Total, castellón/Castelló, Palmas Las, Valencia/València, Balears Illes, Coruña A, Rioja La
+population_vals[!population_vals %in% final_data_vals] 
+```
+
+```{r}
+equivalences <- c(
+  "A Coruña" = "Coruña A",
+  "Las Palmas" = "Palmas Las",
+  "NC" = "NC",
+  "València/Valencia" = "Valencia/València",
+  "Castelló/Castellón" = "Castellón/Castelló",
+  "La Rioja" = "Rioja La",
+  "Balears" = "Balears Illes"
+)
+```
+
+## Question 15
+> We join both databases taking into account the non matching values
+
+```{r}
+#| eval: true
+final_data <- final_data |>
+  mutate(provincia = ifelse(provincia %in% names(equivalences), 
+                            equivalences[provincia], 
+                            provincia))
+
+final_data <- final_data |>
+  left_join(population, by = "provincia")
+
+print (final_data, width = Inf)
+
+```
+
+## Question 15
+
+>**ANSWER:** I joined both databases but taking into account that some provinces do not coincide at all, such as "Las Palmas" and "Palmas Las" or "València/Valencia" and "Valencia/València", so for these I created a vector of equivalences that I replaced in one of the databases to be able to join them without there being missing values
+
+## Question 16
+
+> Define a function called `cum_incidence()` that, given as arguments an ordered vector (by date) of cases and another parameter $k$, calculates the cumulative incidence at $k$ days (understood as the number of cases in the last $k$ days per 100000 habitants). Make use of this function and create a new variable representing the cumulative incidence, in each age group, sex and province. Then, determine the 5 provinces with the highest cumulative incidence in women over 80 years of age as of March 1, 2022.
+
+## Question 16
+
+```{r}
+#| eval: true
+#Cumulative incidence: we  create function
+cum_incidence <- function(cases, k, poblacion){
+  cases <- ifelse(is.na(cases), 0, cases)
+  cases <- as.numeric(cases)
+  poblacion <- as.numeric(poblacion)
+  roll_sum <- rollsum(cases, k, fill = NA, align = "right")
+  incidence <- (roll_sum / poblacion) * 100000
+  return(incidence)
+}
+
+#Function applied
+covid_incidence <- final_data |>
+  group_by(provincia, age_group, sex) |>
+  mutate(
+    cum_incidence = cum_incidence(cases, k = 7, poblacion = poblacion)) |>
+  ungroup()
+
+```
+
+## Question 16
+
+```{r}
+#| eval: true
+covid_incidence |>
+  filter(age_group == "80+", 
+         sex == "M",  
+         fecha == as.Date("2022-03-01")) |>
+  arrange (desc(cum_incidence)) |>
+  slice_head (n=5)
+
+```
+
+## Question 16
+
+>**ANSWER:** We define the function cum_incidence(), within which we calculate the cumulative incidence of the last $k$ days, dividing the total number of cases in that period by the population of each province, and then multiplying by 100,000 to obtain the rate per every 100,000 inhabitants. When applying the function we consider 7 days (because a week has 7 days). And then we filter for the profile that interests us (women over 80 years of age as of March 1, 2022.)
+The 5 provinces with the highest cumulative incidence in women over 80 years of age as of March 1, 2022 are **Lugo, Zamora, Ourense, Ávila and Asturias**
+
+## Question 17
+
+> The last question does not exist and it is up to you to formulate and solve it. What question can you think of that could be interesting to ask with the current database? Why? What would be its resolution? You have absolute creative freedom to do so.
+
+>**QUESTION** How has the incidence rate of COVID-19 evolved over time? And what's the difference in the incidence of Covid-19 in the different CCAA in 2020?  Also analize the differences between sexes and age groups
+
+## Question 17
+
+> COVID-19 OVER TIME
+
+```{r}
+#| eval: true
+#First we want to see the evolution of the incidence rate of COVID-19
+covid_data <- final_data |>
+  mutate(
+    tasa_incidencia = (cases / poblacion) * 100000,
+    month_year_new = as.Date(paste0(year(fecha), "-", month(fecha), "-01"))) |>
+  filter(!is.na(sex))
+
+plot <- ggplot(covid_data, aes(x = month_year_new, y = tasa_incidencia, color = sex)) +
+  geom_line() +
+  labs(title = "Evolution of the incidence rate of COVID-19",
+       x = "Month",
+       y = "Incidence rate per 100,000 inhabitants") +
+  theme_minimal() +
+  scale_x_date(date_labels = "%b-%Y", date_breaks = "1 month") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## Question 17
+
+```{r}
+
+print (plot)
+```
+
+## Question 17
+
+> **ANSWER:**Since March 2020, we see that the incidence rate of COvid-19 is increasing as time passes although we see several drops: June 2020, March, April and October 2021. We also see that there were spikes in covid cases in July-August 2021 and also December 2021-January 2022.
+We cannot say much about the differences by sex since for many cases there is no data for one of the sexes, and sometimes the rates for a certain sex are very very low compared to the other sex, which really shows that data is missing (I highly doubt it is because there were really significant differences between sexes).
+
+## Question 17
+
+> COVID-19 BY CCAA
+
+```{r}
+#| eval: true
+#In this case we'll see the differences using ANOVA. 
+covid_data_2020 <- covid_data |> 
+  filter(year(month_year_new) == 2020)
+
+anova_result <- aov(tasa_incidencia ~ CCAA, data = covid_data_2020)
+summary(anova_result)
+```
+> **ANSWER:** There are significative differences between CCAA incidence rate of Covid-19 in the year 2020
+
+## Question 17
+
+```{r}
+#| eval: true
+posthoc_result <- TukeyHSD(anova_result)
+posthoc_result
+```
+## Question 17
+
+> **ANSWER:**  In general we see that the differences in the incidence rate of covid-19 are significant between all the Autonomous Communities, except in very few cases where there is not significative differences, such as, Castilla y León - Asturias / Castilla y León - Andalusia / Valencia - Asturias / Balearic Islands - Castilla y León / Valencia - Castilla y León / Madrid - Murcia / Madrid - Catalonia / Navarra - Castilla La Mancha / Aragón - Navarra / La Rioja - Aragón/  Balearic Islands - Galicia / Galicia - Asturias. 
+
+## Question 17
+> COVID-19 BY AGE AND SEX 
+
+```{r}
+#| eval: true
+# We are going to do a regression. We prepare our data
+
+#First we clean the data
+covid_data_clean <- covid_data |>
+  filter(sex != "NC", age_group != "NC") |>
+  drop_na(tasa_incidencia, sex, age_group) 
+
+#As factor
+covid_data_clean <- covid_data_clean |>
+  mutate(
+    sex = factor(sex, levels = c("H", "M")),
+    age_group = factor(age_group)       
+  )
+```
+
+## Question 17
+
+```{r}
+# Lineal Regression
+modelo_regresion <- lm(tasa_incidencia ~ age_group + sex, data = covid_data_clean)
+summary(modelo_regresion)
+```
+
+## Question 17
+
+> **ANSWER:** First we observe that it is a significant model with a p-value below the confidence level (<0.05) although it has a low R-squared (sex and age only manage to explain 2% of the variance of the Covid-19 incidence rates). Even so, we see that both variables are significant in the model as well as all categories. 
+
+>We can say that with respect to sex, being female (M-mujer) is associated with an increase of 0.2165 units in the incidence rate of COVID-19 compared to being male (H-hombre), holding other variables constant. (as I previously said, that can be explained because there are some missing value, and some of them among males, so there's a bias)
+
+## Question 17
+
+>Regarding the age groups we see that the reference age group is 0-9 years, and what we see is that those with positive coefficients (10 to 60 years) indicate that the incidence rates of COVID-19 are higher for these age groups compared to the younger ones (0 to 9 years). In contrast, those older than 60 years would have lower incidence rates than the younger ones. This may be explained by the fact that there was high protection of the elderly during the COVID-19 months. 
